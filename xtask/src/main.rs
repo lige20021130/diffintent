@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! 本地开发命令。绝不进发布物、不进 README 的安装路径。
 use clap::{Parser, Subcommand};
 

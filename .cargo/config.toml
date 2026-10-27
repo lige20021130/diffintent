@@ -1,4 +1,0 @@
-[target.x86_64-pc-windows-msvc]
-# 允许 CI 把 CC 指到 cl.exe；本地从 VS Developer Shell 继承。
-# 未设置时 cl.exe 不在 PATH 会让 tree-sitter 语法构建失败（spec R3）。
-linker = "link.exe"

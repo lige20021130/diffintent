@@ -1,0 +1,11 @@
+[package]
+name = "bench-floor"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "冷启动参考下界：零依赖的空二进制，供 scripts/check-budget.sh 求边际成本（裁定 MA3）"
+
+# 故意没有任何依赖：这个包的启动时间就是本机 CreateProcess/动态加载的下界。
+# diffintent 的冷启动预算按"减去这个下界"判定，否则测的是操作系统而不是我们的代码。
+# 也故意不写 [profile.*]：workspace 根的 release profile（lto/strip/codegen-units）
+# 对成员同样生效，两个二进制因此是同一种构建形态，可直接相减。

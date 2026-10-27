@@ -1,0 +1,62 @@
+# spec §10 构造级禁网白名单（Task 1 复核裁定 MA4：allowlist 取代 denylist）。
+#
+# 规则：`cargo tree -e normal --workspace --offline` 里出现的**每一个包名**都必须在本文件
+# 显式列出。任何一个不在名单里 -> scripts/check-no-network.sh 点名它并 exit 1。
+#
+# 为什么不是 denylist：旧脚本的关键词表实测漏掉 sqlx / diesel / redis / curl / winhttp /
+# mongodb / libsqlite3-sys（最后一个还踩了尾部字符类接不住 `3` 的边界 bug）。
+# "我们想到的坏名字"永远少于"实际存在的坏名字"；spec §10 的原话是**构造上不可能调网**，
+# 只有闭集白名单才有那个语义——新依赖必须经过这里，才经过得了发布物。
+#
+# 加白名单的正规流程：
+#   1) 先确认它及其全部传递依赖不含 HTTP/TLS/加密套件/DB 客户端/系统网络 API；
+#   2) 把名字按下面的分组加进来，并在 PR 描述里写一句它为什么不可能联网；
+#   3) 顺手更新本文件的"生成于"注释。
+#
+# 生成于：diffintent 0.0.0 / clap 4.6.7 / serde 1.x / serde_json 1.0.154 / thiserror 2.x
+# 唯一包名 33 个（workspace 三个成员 + 30 个 registry 传递依赖）。
+
+# --- workspace 成员本身（本地代码，不在 registry） ---
+diffintent
+xtask
+bench-floor
+
+# --- clap 4.6.7：CLI 解析（终端样式与 ANSI 子链都是渲染用，不含网络 API） ---
+anstream
+anstyle
+anstyle-parse
+anstyle-query
+anstyle-wincon
+clap
+clap_builder
+clap_derive
+clap_lex
+colorchoice
+heck
+is_terminal_polyfill
+once_cell_polyfill
+strsim
+utf8parse
+
+# --- Windows FFI 绑定（仅控制台/终端查询用；windows-sys 是原始声明，不含 winhttp 等 feature） ---
+windows-link
+windows-sys
+
+# --- proc-macro 构建期链（serde_derive / thiserror-impl / clap_derive 共用） ---
+proc-macro2
+quote
+syn
+unicode-ident
+
+# --- serde 1.x + serde_json 1.0.154：契约 JSON 序列化（纯内存，无 IO feature） ---
+itoa
+memchr
+serde
+serde_core
+serde_derive
+serde_json
+zmij
+
+# --- thiserror 2.x：错误派生 ---
+thiserror
+thiserror-impl

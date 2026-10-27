@@ -43,10 +43,10 @@
 | R5 | `StmtInfo.early_exit_only` 的字段定义随 Task 9 的 `statement_list` 一起落地（Task 9 的 `tests/scope_diff.rs` 必须断言它，三种场景：纯文本相等→`Same`、`return a`→`return a + 1`→`Loose`、`if`→`for`→`Removed`+`Added`）；Task 10 只消费 | Task 9 Step 2、Task 10 Step 2 |
 | R6 | **`align` 的 dp 相等判据必须是 `an[i] == bn[j] \|\| same_skeleton(...)`**，回溯时才区分 `Same` 与 `Loose`。按正文写法（dp 只按文本建、`Loose` 在回溯里判）会让 dp 表与实际路径不一致 | Task 9 Step 2 |
 | R7 | `.gitignore` = `/target` + `/.superpowers/`；**`Cargo.lock` 提交**（发布物是二进制，可复现构建优先）。不写空 `[build-dependencies]` 节 | Task 1 Step 3 |
-| R8 | CI 三处修正：cache action 用 `Swatinem/rust-cache@v2`；性能测试命令是 `cargo test --release --locked -- --ignored`（`--cases` 不是 cargo 参数）；`check-budget.sh` 计时用 `date +%s%N`，不用 `python -c`（runner 上未必有 `python`） | Task 1 Step 9、Step 11 |
+| R8 | CI 三处修正：cache action 用 `Swatinem/rust-cache@v2`；性能测试命令是 `cargo test --release --locked --workspace -- --ignored --list` 先钉住测试存在（Task 1 复核 MB1a：跑 0 个测试也 exit 0，等于没有门禁），再 `-- --ignored` 执行；~~`check-budget.sh` 计时用 `date +%s%N`~~ **已被 Task 1 复核 Critical 1 推翻**：BSD `date` 无 `%N`，macOS 上脚本中止或退化成秒精度；改用 bash `EPOCHREALTIME` → `perl Time::HiRes` → `python`(perf_counter) 三级择一，量不到毫秒即 exit 1。冷启动判定同时改口径（裁定 MA3：边际成本 ≤ 15 ms + 绝对上界 160 ms 冒烟） | Task 1 Step 9、Step 11 |
 | R9 | normal deps 口径 8 是零余量。Task 6 `cargo add` 后先跑 `check-no-network.sh` 打印实际计数；若 >8，**改 spec §12 口径为 ≤10 而不是删功能**——为凑代理指标去手写参数解析是更大的风险 | Task 6 |
 
-另有一处**已知的环境偏离**：本机在 Windows 上，而 `link.exe` 会被 `C:\Program Files\Git\usr\bin\link.exe`（coreutils 的建硬链接工具）遮蔽。实现者遇到"linker 报不认识参数 / 拒绝所有 .o"时，先跑 `command -v link.exe` 确认拿到的是不是 Git 的那个，再调 PATH 顺序；不要改 `.cargo/config.toml` 去猜。
+另有一处**已知的环境偏离**：本机在 Windows 上，而 `link.exe` 会被 `C:\Program Files\Git\usr\bin\link.exe`（coreutils 的建硬链接工具）遮蔽。实现者遇到"linker 报不认识参数 / 拒绝所有 .o"时，先跑 `command -v link.exe` 确认拿到的是不是 Git 的那个，再调 PATH 顺序。**不要为此在 `.cargo/config.toml` 里写 `linker = "link.exe"`**——Task 1 复核裁定 MA2 已删除该配置：显式设 linker 会让 rustc 跳过 `windows_registry::find_tool` 探测，把解析降级成 PATH 顺序赌局；不写这一行时 rustc 默认从 VS 注册表拿到 MSVC 的 link.exe，严格更稳健。
 
 ---
 
@@ -57,7 +57,6 @@
 ```
 Cargo.toml
 build.rs                                pin grammar headers; NO network
-.cargo/config.toml                      CC env passthrough on Windows MSVC
 src/main.rs                             CLI surface: --file/--repo/--json/--dump-events/--version
 src/lib.rs                              库入口 + Pipeline::run()（只到 event_extract）
 src/seir/mod.rs                         EventKind(14) Direction Event EvidenceTier ScopeRef FileId + 规范序
@@ -105,15 +104,15 @@ scripts/check-no-network.sh  scripts/check-budget.sh
 覆盖 spec §12 的体积 / 冷启动 / 零网络三项 + §10 红线 + R3（Windows 构建）。放在最前是因为 R3 必须在第一天暴露，而不是留到分发阶段才发现构建不过。
 
 **Files:**
-- Create: `Cargo.toml`（workspace root + bin + lib）
-- Create: `build.rs`
+- Create: `Cargo.toml`（workspace root + bin + lib + `bench-floor` 参考空二进制成员）
+- ~~Create: `build.rs`~~ **不创建**（Task 1 复核裁定 MA1：顶层 build script 的 `cargo:rustc-env` 到不了依赖的 build script，registry 路径又缺 index-hash 段，目标从未成立；语法包源码的 vendoring 归 Task 6，用 `[patch.crates-io]` 指本地副本）
 - Create: `src/main.rs`, `src/lib.rs`
 - Create: `xtask/Cargo.toml`, `xtask/src/main.rs`
-- Create: `.cargo/config.toml`
-- Create: `scripts/check-no-network.sh`, `scripts/check-budget.sh`
+- ~~Create: `.cargo/config.toml`~~ **不创建**（裁定 MA2：显式 `linker` 降级 rustc 的 MSVC 自动探测）
+- Create: `scripts/check-no-network.sh`, `scripts/check-budget.sh`, `scripts/allowed-normal-deps.txt`
 - Create: `.github/workflows/ci.yml`
 - Create: `rust-toolchain.toml`, `.gitignore`
-- Test: `tests/budget.rs`
+- Test: `tests/budget.rs`, `tests/spec_invariants.rs`
 
 **Interfaces:**
 - Consumes: 无
@@ -281,7 +280,13 @@ fn main() {
 }
 ```
 
-- [ ] **Step 5: 写 build.rs，把语法包 C 源从网络依赖里摘出来**
+- [ ] **Step 5: ~~写 build.rs，把语法包 C 源从网络依赖里摘出来~~ —— 按裁定 MA1 取消（本步骤整段作废，代码不落地）**
+
+> **Task 1 复核裁定 MA1**：下面这段代码从未达成目标，已随 `build.rs` 一起删除。两条独立死因：
+> (a) 顶层 build script 的 `cargo:rustc-env` 只对本编译单元可见，依赖的 build script 更早、在独立进程里运行，`DIFFINTENT_GRAMMAR_SRC_*` 到不了 tree-sitter 语法包手里——换变量名也没用，没有一个名字能用；
+> (b) registry 实际布局是 `registry/src/index.crates.io-<hash>/<krate>-<ver>`，代码算的是 `registry/src/<krate>-<ver>`，该路径不存在。
+> Task 6 若真撞上语法包联网取源码，改用 vendored 源码目录 + `[patch.crates-io]` 指向本地副本；**那是 Task 6 的事，不在 Task 1 预建**。
+> 附带收益：那两个 `cargo:rerun-if-changed=<krate>` 指向不存在的路径，导致每次 `cargo build` 都重编本 crate（实测 0.79s → 删除后 0.03s 全 Fresh）。
 
 tree-sitter 语法 crate 的 build script 会在缺失时下载 `parser.c`/`scanner.c`。发布物不能带网络构建步骤，故在构建前把它们复制进 `vendor/grammar-src/` 并指向副本。
 
@@ -344,7 +349,9 @@ fn parse_locked_version(lock: &str, krate: &str) -> Option<String> {
 
 **注意**：`parse_locked_version` 的 `in_block` 逻辑很脆，Step 6 会先为它写单测再放行。若 `DIFFINTENT_GRAMMAR_SRC_*` 环境变量名与语法 crate build script 实际读取的名字不符（各 crate 版本不同），Task 6 的 Step 会实测并改这个名字——**不要在此处猜测环境变量名**。
 
-- [ ] **Step 6: 为 lockfile 解析写测试**
+- [ ] **Step 6: ~~为 lockfile 解析写测试~~ —— 随 Step 5 一并作废（裁定 MA1）**
+
+> 这两个测试写在 `build.rs` 的 `#[cfg(test)]` 里，而 stable cargo 从不编译/执行 build script 的测试，"Expected: 2 passed"在设计上不可能成立（原报告 D3 已暴露该验证缺口）。MA1 删除 `build.rs` 时连同这两测删除；Task 1 的可执行红线改由 `tests/spec_invariants.rs` 承担（MB1b）。
 
 `build.rs` 末尾追加：
 
@@ -375,18 +382,18 @@ version = \"0.25.0\"
 
 Run: `cargo test --build -p diffintent` 或 `cargo test`。Expected: 2 passed。
 
-- [ ] **Step 7: Windows 编译器查找兜底**
+- [ ] **Step 7: Windows 编译器查找兜底 —— 按裁定 MA2 取消（不写 `.cargo/config.toml`）**
 
-`.cargo/config.toml`：
+原本这里要写：
 
 ```toml
 [target.x86_64-pc-windows-msvc]
-# 允许 CI 把 CC 指到 cl.exe；本地从 VS Developer Shell 继承。
-# 未设置时 cl.exe 不在 PATH 会让 tree-sitter 语法构建失败（spec R3）。
 linker = "link.exe"
 ```
 
-若 Step 1 选了 MinGW 路线则改为 `[target.x86_64-pc-windows-gnu] rustflags = ["-C", "target-cpu=native"]` 并在 spec §13 标注该偏差。
+**该配置项已由 Task 1 复核裁定 MA2 删除**，理由是它主动降低稳健性：一旦显式指定 `linker`，rustc 就不再走 `windows_registry::find_tool` 的 MSVC 自动探测，而是把 `link.exe` 交给 PATH 顺序去猜——本机 PATH 里确实存在 Git 的 coreutils `link.exe`（`C:\Program Files\Git\usr\bin`，用途是建硬链接，不是连接器）。不写这一行时 rustc 从 VS 注册表直接解析出 MSVC 的 link.exe，严格更优。原注释里的两处错误一并作废：`CC` 不是 linker 的配置方式；不加该行 rustc 本来就能找到 link.exe。
+
+若 Step 1 选了 MinGW 路线，则只需 `rustup target add x86_64-pc-windows-gnu` 并在 spec §13 标注该偏差；同样不需要手写 linker。
 
 - [ ] **Step 8: 写禁网门禁**
 
@@ -578,12 +585,12 @@ Expected: 全绿。`check-budget` 对 debug 二进制会报超体积——**这�
 
 ```bash
 git checkout -b feat/w1-scaffold
-git add Cargo.toml Cargo.lock build.rs .cargo/config.toml rust-toolchain.toml .gitignore \
-        src/main.rs src/lib.rs xtask scripts .github
+git add Cargo.toml Cargo.lock rust-toolchain.toml .gitignore \
+        src/main.rs src/lib.rs src tests bench-floor xtask scripts .github
 git commit -m "feat: Rust 脚手架 + 三平台 CI + 禁网/体积/冷启动门禁
 
-build.rs 把语法包 C 源从网络构建路径摘出（发布物不得有下载步骤）。
-check-no-network.sh 落实 spec §10 的构造级禁网断言。
+check-no-network.sh 以 allowlist 落实 spec §10 的构造级禁网断言（裁定 MA4）。
+check-budget.sh 用参考空二进制求冷启动边际成本（裁定 MA3），bench-floor 即该参考。
 Windows MSVC 从第一天进 CI 矩阵，对应 spec R3。"
 ```
 

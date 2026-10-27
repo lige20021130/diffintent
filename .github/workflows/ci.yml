@@ -18,19 +18,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
-      - run: rustup component add rustfmt clippy
+      # 不写 rustup component add rustfmt clippy：rust-toolchain.toml 的
+      # components = ["rustfmt", "clippy"] 已在工具链激活时装好（复核 MB4）。
       - run: cargo fmt --all --check
-      - run: cargo clippy --all-targets --locked -- -D warnings -D clippy::all
-      - run: cargo test --locked
-      - name: 禁网门禁（spec §10）
+      # --workspace：workspace_default_members 只有根包，不带它 xtask/bench-floor
+      # 在 CI 里从不被编译（复核 MB2；Task 3 会往 xtask 里塞代码）。
+      - run: cargo clippy --all-targets --workspace --locked -- -D warnings -D clippy::all
+      - run: cargo test --workspace --locked
+      - name: 禁网门禁（spec §10，allowlist 闭集判定）
         run: bash scripts/check-no-network.sh
       - run: cargo build --release --locked
+      # 冷启动边际成本的参考下界（裁定 MA3）。在门禁步骤之前显式构建，
+      # 让 check-budget.sh 只测量、不在门禁中途悄悄改构建状态。
+      - name: 构建冷启动参考空二进制（bench-floor）
+        run: cargo build --release --locked -p bench-floor
       - name: 体积与冷启动门禁（spec §12）
         run: bash scripts/check-budget.sh target/release/diffintent
-      - name: 性能基准
-        run: cargo test --release --locked -- --ignored
+      # 性能门禁在测试存在之前必须**失败**（复核 MB1a）。
+      # 今天 tests/budget.rs 仍是注释桩，`--ignored` 跑 0 个测试也 exit 0，
+      # 而步骤名叫"性能基准"——那是宣传不存在的覆盖。先 --list 钉住测试名，
+      # 名字不在就 exit 1；Task 14 补上实现后此步骤自然转绿，无需再改本文件。
+      - name: 性能基准（50 文件 / 2000 行；实现见 Task 14）
+        run: |
+          LIST=$(cargo test --release --locked --workspace -- --ignored --list 2>/dev/null)
+          echo "$LIST"
+          if ! printf '%s\n' "$LIST" | grep -q 'fifty_file_two_thousand_line'; then
+            echo "::error::性能门禁缺失：release 测试列表里找不到 fifty_file_two_thousand_line*"
+            echo "这不是环境故障。spec §12 的 50 文件/2000 行回归必须由 CI 真实执行；"
+            echo "tests/budget.rs 目前是注释桩（它调用的 patch/events API 在 Task 3/5/8 才存在）。"
+            echo "Task 14 解除 ignore 后本步骤才会转绿。"
+            exit 1
+          fi
+          cargo test --release --locked --workspace -- --ignored
       - name: 体积写入摘要（便于回查是哪次提交顶上去的）
         if: always()
         run: |
-          SIZE=$(stat -c%s target/release/diffintent 2>/dev/null || wc -c < target/release/diffintent.exe)
-          echo "diffintent release size: $((SIZE/1024/1024)) MB" >> "$GITHUB_STEP_SUMMARY"
+          EXE=target/release/diffintent
+          [ -f "$EXE" ] || EXE="$EXE.exe"
+          if [ -f "$EXE" ]; then
+            SIZE=$(( $(stat -c%s "$EXE" 2>/dev/null || wc -c <"$EXE") ))
+            # 与 check-budget.sh 同口径：字节 + 一位小数 MB（向下取整会把 0.6 MB 打成 0 MB）。
+            echo "diffintent release size: $(awk -v s="$SIZE" 'BEGIN{printf "%.1f", s/1048576}') MB (${SIZE} bytes)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "diffintent release size: n/a（找不到 $EXE，前面的构建步骤未产出二进制）" >> "$GITHUB_STEP_SUMMARY"
+          fi

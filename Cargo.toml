@@ -1,14 +1,18 @@
 [workspace]
-members = [".", "xtask"]
+members = [".", "xtask", "bench-floor"]
 
 [package]
 name = "diffintent"
 version = "0.0.0"
 edition = "2021"
-rust-version = "1.77"
+# 不写 rust-version：Task 1 复核 MB4 二选一裁定取"删掉装饰性约束"。
+# 原值 1.77 不只是没门禁，它是假的——锁定的依赖里 clap 4.6.7 / clap_builder 4.6.7
+# 自带 rust-version = "1.85"，1.77 工具链在这里必然构建失败。
+# 真要声明 MSRV，得先加一个 MSRV job（用该版本的工具链实跑 cargo build），
+# 取全部锁定依赖 rust-version 的最大值，属 Task 14 分发接线项，不在这里挂个空数字。
 description = "Zero-LLM structural intent classification for unified diffs"
 license = "MIT"
-repository = "https://github.com/OWNER/diffintent"
+repository = "https://github.com/lige20021130/diffintent"
 
 [[bin]]
 name = "diffintent"
@@ -24,11 +28,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 
-[dev-dependencies]
-insta = "1"
-proptest = "1"
-tempfile = "3"
-walkdir = "2"
+# 本期不挂 dev-dependencies（MB4）：insta/proptest/tempfile/walkdir 今天无人使用，
+# 却把 chacha20/rusty-fork/rand/getrandom 拉进 Cargo.lock 与审计面。
+# Task 2 需要 proptest/insta 时再随测试一起加回，届时禁网白名单同步更新。
 
 [profile.release]
 lto = "thin"
