@@ -52,6 +52,7 @@ diffintent --repo /path/to/tree            # 显式指定重建基线的工作�
 | `--fail-on-drift` | 存在 `drift: true` 块时退出码 1 |
 | `--fail-on-unknown` | 存在 `confidence < 0.6` 或 `unknown` 块时退出码 2 |
 | `--details` | 逐行内容。默认一屏摘要，不展示逐行 |
+| `--dump-events` | **内部调试面，不属 `diffintent/1` 契约**：按规范序输出原始 `seir::Event` 序列（含 tier）。用于 W1 里程碑验证与 issue 复现；文档明确标注 unstable，随时可变 |
 | 无网络参数 | **不存在 `--llm-fallback`、`--api-key`、`--model` 这类选项** |
 
 ### 2.1 退出码（版本化契约的一部分）
@@ -253,11 +254,15 @@ pub struct Event {
 
 | 层级 | 触发条件 | 能力 |
 |---|---|---|
-| `full_ast` | cwd（或 `--repo`）是 git 工作树 **且** diff 的 `+++ b/` 路径在磁盘存在 **且** 内容校验对得上 | 重建完整新旧文件 → 双侧真 AST → `scope` 可靠、`module`/`dependency` 判据完整 |
+| `full_ast` | cwd（或 `--repo`）是 git 工作树 **且** diff 的 `+++ b/` 路径在磁盘存在 **且** 内容与 hunk 后镜像对得上 | 重建完整新旧文件 → 双侧真 AST → `scope` 可靠、`module`/`dependency` 判据完整 |
 | `hunk_only` | 上条任一不成立 | 每个 hunk 的新旧两侧按代码片段独立解析 → 对比事件集。`scope` 常为 `null` |
 | `text_fallback` | 语法不可用（非 TS/JS/Python）或解析失败 | 扩展名 + 关键字 + 行级模式；标 `grammar_unsupported`，**置信度按 tier 打折** |
 
-内容校验**不得静默继续**——工作树与 diff 不同源（PR 分支、staged 与工作区不一致）时，全量 AST 比 hunk 片段更危险。校验方法（确定性、无需 git 对象库）：对每个 hunk，检查磁盘文件的**前镜像**（`context` 行 + `-` 删除行）是否与 hunk 声明的行位置逐行相符；**任一 hunk 不符即整个文件降到 `hunk_only`**，并在 `summary` 记录降级原因 `preimage_mismatch`。不做部分采信，因为半对半错的 AST 会产出看似高置信的错判。
+**校验对象是后镜像，不是前镜像**（`git diff` 的工作树里是 `b/` 侧内容；`git diff --staged` 两者都不是）。方法：对每个 hunk，检查磁盘文件的**后镜像**（`context` 行 + `+` 新增行）是否与 hunk 声明的 `new_start` 位置逐行相符；**任一 hunk 不符即整个文件降到 `hunk_only`**，`summary` 记录 `content_mismatch`。删除文件校验 `---` 侧前镜像，新增文件校验全量后镜像。
+
+拿到可信的后镜像后，旧文件由「磁盘内容 − 各 hunk 的后镜像行 + 前镜像行」重建——**unified diff 的 hunk 之外两侧恒等**，故这一重建是精确的，不需要 git 对象库，也不需要 libgit2 依赖。
+
+不做部分采信：半对半错的 AST 会产出看似高置信的错判。
 
 **校准分桶按 tier 切**，这直接落实原书 §8.4："满血 AST"和"瞎猜 hunk"的置信度不该混在一个桶里算 Brier。
 
@@ -432,6 +437,7 @@ I5/I6/I7 是**负对照**，直接量出误报率（判据必须能变红）。
 | 置信度分桶校准误差（按 tier 分层） | ≤ 0.15 | 分桶维度增加 tier |
 | 冷启动 | < 80 ms | 不变 |
 | 二进制体积 | < 12 MB | 已核实可行：ast-grep（16k★，静态链接多语法）Linux zip 实测 8.45 MB；三个 WASM 语法约 3.4 MB |
+| **依赖预算（修订）** | 运行时 crate ≤ 8，dev/构建期 crate 不计；**禁止任何 HTTP/TLS/加密/数据库客户端 crate** | 原书"≤3 依赖"不可满足：tree-sitter 核心 + 3 个语法包就已占 4，再加 clap/serde/serde_json 就破。原书这条的本意是体积与供应链面控制，故改以** crate 白名单 + 体积实测**为准，README 列全量依赖表 |
 | 50 文件 / 2k 行 diff | < 300 ms | 不变 |
 | 确定性 | 同输入逐字节相同（property test） | 落实为测试 |
 | 零网络 | 依赖图 CI 门禁 | 从"默认关闭"升级为"构造不可能" |
@@ -506,7 +512,7 @@ viewer / diff 展示、PR bot 与 Web UI、历史存储与平台化、变更类�
 
 ## 17. 里程碑
 
-四周串行，**每周一个独立可验证的产出**。范围对单一实现计划偏大，故实现阶段按里程碑拆成四份计划（W1/W2、W3、W4 各成一份，W2 结尾的基线测量是进入 W3 的闸门）。
+四周串行，**每周一个独立可验证的产出**。范围对单一实现计划偏大，故实现阶段按里程碑拆成四份计划：W1、W2、W3、W4 各一份。**W2 结尾的基线精度测量是进入 W3 的闸门**——在量出三分类基线之前写 W3 的 drift 细则，等于先定判据再找证据（R1）。
 
 **W1 — 输入与事件**
 `patch_parse` → `evidence_resolve` → `event_extract`（TS/JS 先行，Python 次之）。
