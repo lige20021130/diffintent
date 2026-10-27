@@ -1,0 +1,36 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run: { shell: bash }
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: rustup component add rustfmt clippy
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --locked -- -D warnings -D clippy::all
+      - run: cargo test --locked
+      - name: 禁网门禁（spec §10）
+        run: bash scripts/check-no-network.sh
+      - run: cargo build --release --locked
+      - name: 体积与冷启动门禁（spec §12）
+        run: bash scripts/check-budget.sh target/release/diffintent
+      - name: 性能基准
+        run: cargo test --release --locked -- --ignored
+      - name: 体积写入摘要（便于回查是哪次提交顶上去的）
+        if: always()
+        run: |
+          SIZE=$(stat -c%s target/release/diffintent 2>/dev/null || wc -c < target/release/diffintent.exe)
+          echo "diffintent release size: $((SIZE/1024/1024)) MB" >> "$GITHUB_STEP_SUMMARY"

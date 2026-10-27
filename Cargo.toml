@@ -1,0 +1,36 @@
+[workspace]
+members = [".", "xtask"]
+
+[package]
+name = "diffintent"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.77"
+description = "Zero-LLM structural intent classification for unified diffs"
+license = "MIT"
+repository = "https://github.com/OWNER/diffintent"
+
+[[bin]]
+name = "diffintent"
+path = "src/main.rs"
+
+[lib]
+name = "diffintent"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+insta = "1"
+proptest = "1"
+tempfile = "3"
+walkdir = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
