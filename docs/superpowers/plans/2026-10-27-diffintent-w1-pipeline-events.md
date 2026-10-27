@@ -30,6 +30,26 @@
 
 ---
 
+## 控制会话裁定（覆盖计划原文）
+
+执行前扫描发现九处计划缺陷。以下裁定**优先级高于下方各任务的正文**；任务正文与裁定冲突时按裁定做，并在该任务的 commit body 里引用裁定编号。完整推理与代价记录在 SDD 台账。
+
+| # | 裁定 | 覆盖位置 |
+|---|---|---|
+| R1 | **`xtask gendev` 改为以 git 为 oracle**：`gendev` 不读 `.diff` 猜间隙，而是消费已提交的 `tests/golden_src/<case>/{before,after}/**`（真实源文件），用临时 git 仓（`init → add before → commit → 覆盖 after → add → commit → diff HEAD~1`）同时产出 `.diff` 与工作树快照。**`postimage()` / `split_rename_with_edit()` 从计划中删除** | Task 3 Step 6 |
+| R2 | `extract_events` 从 Task 7 起就返回 `ExtractOutcome { events, degradations, resolved }`（不是 `Vec<Event>`）。tier 是 per-file 事实，AST 解析失败发生在抽取阶段；不带出 `resolved` 则 `summary.evidence_tiers` 与 block 的 `evidence_tier` 必然不一致，违反 spec R2 | Task 7 Step 3、Task 8 Step 5 |
+| R3 | `analyze()` 从 Task 14 **提前到 Task 12**（hunk_only 与 text_fallback 的测试都需要端到端入口）。`Worktree::none()` 删除，所有"无工作树"统一传 `None`；`resolve` 签名一律 `Option<&Worktree>` | Task 5 Step 4、Task 12、Task 13 Step 1、Task 14 Step 2 |
+| R4 | **不写 `panic = "abort"`**：stable 上 `cargo test --release` 需 `-Z panic-abort-tests`，而性能测试必须 release 跑 | Task 1 Step 4 |
+| R5 | `StmtInfo.early_exit_only` 的字段定义随 Task 9 的 `statement_list` 一起落地（Task 9 的 `tests/scope_diff.rs` 必须断言它，三种场景：纯文本相等→`Same`、`return a`→`return a + 1`→`Loose`、`if`→`for`→`Removed`+`Added`）；Task 10 只消费 | Task 9 Step 2、Task 10 Step 2 |
+| R6 | **`align` 的 dp 相等判据必须是 `an[i] == bn[j] \|\| same_skeleton(...)`**，回溯时才区分 `Same` 与 `Loose`。按正文写法（dp 只按文本建、`Loose` 在回溯里判）会让 dp 表与实际路径不一致 | Task 9 Step 2 |
+| R7 | `.gitignore` = `/target` + `/.superpowers/`；**`Cargo.lock` 提交**（发布物是二进制，可复现构建优先）。不写空 `[build-dependencies]` 节 | Task 1 Step 3 |
+| R8 | CI 三处修正：cache action 用 `Swatinem/rust-cache@v2`；性能测试命令是 `cargo test --release --locked -- --ignored`（`--cases` 不是 cargo 参数）；`check-budget.sh` 计时用 `date +%s%N`，不用 `python -c`（runner 上未必有 `python`） | Task 1 Step 9、Step 11 |
+| R9 | normal deps 口径 8 是零余量。Task 6 `cargo add` 后先跑 `check-no-network.sh` 打印实际计数；若 >8，**改 spec §12 口径为 ≤10 而不是删功能**——为凑代理指标去手写参数解析是更大的风险 | Task 6 |
+
+另有一处**已知的环境偏离**：本机在 Windows 上，而 `link.exe` 会被 `C:\Program Files\Git\usr\bin\link.exe`（coreutils 的建硬链接工具）遮蔽。实现者遇到"linker 报不认识参数 / 拒绝所有 .o"时，先跑 `command -v link.exe` 确认拿到的是不是 Git 的那个，再调 PATH 顺序；不要改 `.cargo/config.toml` 去猜。
+
+---
+
 ## 文件结构
 
 先画定边界，再定任务。每个文件一个职责，一起变的放一起。
@@ -167,8 +187,9 @@ walkdir = "2"
 lto = "thin"
 codegen-units = 1
 strip = true
-panic = "abort"
 ```
+
+**故意不写 `panic = "abort"`（Ruling 4）**：stable 上 `cargo test --release` 需要 `-Z panic-abort-tests`，而 Task 14 的性能测试必须以 `--release` 跑。`lto="thin"` + `strip` 已拿到大部分体积收益，`panic="abort"` 的额外收益对 12 MB 预算而言不值得牺牲测试路径。同理**不写空的 `[build-dependencies]` 节**——cargo 会警告。
 
 `rust-toolchain.toml`：
 
@@ -178,14 +199,14 @@ channel = "stable"
 components = ["rustfmt", "clippy"]
 ```
 
-`.gitignore`：
+`.gitignore`（**Ruling 7**：`Cargo.lock` 要提交，发布物是二进制，可复现构建优先）：
 
 ```
 /target
-Cargo.lock
+/.superpowers/
 ```
 
-（库形态也提交 lock 更好；这里按 bin crate 惯例提交 `Cargo.lock`，故把上面一行改成 `/target` 单独一行。**决定：提交 Cargo.lock**，因为发布物是二进制，可复现构建优先。）
+紧接着执行 `git add Cargo.lock`（Task 1 Step 14 的 add 列表里已含它）。`.superpowers/` 由控制会话拥有，不进实现提交。
 
 - [ ] **Step 4: 写最小 lib 与 bin，让 workspace 能编译**
 
