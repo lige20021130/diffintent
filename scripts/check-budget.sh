@@ -70,8 +70,8 @@ stamp() {
   esac
 }
 
-# best-of-5，--version 走 clap 的早退路径，不进流水线。
-measure() {
+# 单次 best-of-N 采样：--version 走 clap 的早退路径，不进流水线。
+sample() {
   local exe="$1" best=999999999 a b d i
   for i in 1 2 3 4 5; do
     stamp; a=$US
@@ -80,17 +80,26 @@ measure() {
     d=$(( (b - a) / 1000 ))
     [ "$d" -lt "$best" ] && best=$d
   done
-  BEST_MS=$best
+  SAMPLE_MS=$best
 }
 
 # 先确认被测二进制真能跑，否则时间数字毫无意义。
 "$EXE" --version >/dev/null 2>&1 || { echo "FAIL: $EXE --version 执行失败（非零退出），冷启动数值不可信"; exit 1; }
 
-measure "$FLOOR"; FLOOR_MS=$BEST_MS
-measure "$EXE";   EXE_MS=$BEST_MS
+# 交替采样，而不是"把参考跑完 5 次再跑被测 5 次"：页缓存/杀软首扫这些一次性成本
+# 只会砸在第一个被测对象上，串行分批会把参考值系统性抬高，差值出现负数（实测 −11 ms），
+# 反向漂移时还可能假红。交替轮询让两个二进制吃同一份热身。
+FLOOR_BEST=999999999
+EXE_BEST=999999999
+for _ in 1 2; do
+  sample "$FLOOR"; [ "$SAMPLE_MS" -lt "$FLOOR_BEST" ] && FLOOR_BEST=$SAMPLE_MS
+  sample "$EXE";   [ "$SAMPLE_MS" -lt "$EXE_BEST" ] && EXE_BEST=$SAMPLE_MS
+done
+FLOOR_MS=$FLOOR_BEST
+EXE_MS=$EXE_BEST
 DELTA_MS=$(( EXE_MS - FLOOR_MS ))
 
-echo "cold start（best of 5，时钟=${CLOCK}）:"
+echo "cold start（每轮 best of 5，两两交替共 2 轮，时钟=${CLOCK}）:"
 echo "  参考空二进制 bench-floor : ${FLOOR_MS} ms"
 echo "  diffintent              : ${EXE_MS} ms"
 echo "  边际成本                : ${DELTA_MS} ms   预算 ≤ 15 ms（裁定 MA3）"
