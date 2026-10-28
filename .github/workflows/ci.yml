@@ -1,6 +1,12 @@
 name: ci
 on:
-  push: { branches: [main] }
+  push:
+    branches:
+      - main
+      # 里程碑分支也要跑：门禁的价值在于每次提交都验，而不是等到开 PR 才发现。
+      # 原触发器只有 main + pull_request，往 feat/* 推送时 CI 根本不启动（实测）。
+      - 'feat/**'
+      - 'fix/**'
   pull_request:
 permissions:
   contents: read
